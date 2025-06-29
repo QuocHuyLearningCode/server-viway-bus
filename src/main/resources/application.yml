@@ -1,0 +1,60 @@
+server:
+  port: 8080
+  address: 0.0.0.0
+spring:
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: quochuyw2610@gmail.com
+    password: qame rlxq zqrj xpym
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+  datasource:
+    url: jdbc:mysql://localhost:3306/futabus?useSSL=false&serverTimezone=Asia/Ho_Chi_Minh
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password:
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: none
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQL8Dialect
+        format_sql: true
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
+api:
+  prefix: /api/v1
+momo:
+  payment:
+    # Development environment
+    dev:
+      partner-code: "MOMOBKUN20180529"
+      access-key: "klm05TvNBzhg7h7j"
+      secret-key: "at67qH6mk8w5Y1nAyMoYKMWACiEi2bsa"
+      endpoint: "https://test-payment.momo.vn/v2/gateway/api"
+      redirect-url: "http://localhost:8080/payment/momo/callback"
+      notify-url: "http://localhost:8080/payment/momo/notify"
+  environment: dev
+jwt:
+  expiration: 2592000
+  #30 days = 30(d)*24(h)*60(m)*60(s)
+  secretKey: rYSY2zSx9461OcxFuMJkdjrcNBDLpz6xzEnwzvWW548=
+twilio:
+  from-number: "+14151234567"
+  account-sid: "ACb5ce586874d4fb24d5d4a4b9920c1de3"
+  auth-token: "b88e9acd5b8ad1036f122a0f791651e3"
+  verify-service-sid: "VAabc6294a108d2ea6d257e47a9beb41e5"
+vnp:
+  tmnCode: ARJPN6WG
+  hashSecret: T7FZXWDITAP1CRYJK2Z9RFMRS1BIKPWE
+  payUrl: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+  returnUrl: http://192.168.0.12:8080/api/v1/ticket/vnpay-return
