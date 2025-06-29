@@ -227,20 +227,28 @@ public class TicketService implements ITicketService {
 
     @Scheduled(fixedRate = 60000)
     public void cancelUnpaidTickets() {
-        LocalDateTime tenMinutesAgo = LocalDateTime.now().minusMinutes(10).withNano(0);
+        LocalDateTime oneMinuteAgo = LocalDateTime.now().minusMinutes(1).withNano(0);
 
-        List<Ticket> tickets = ticketRepository.findAllByStatusAndCreatedAtBefore(TicketStatus.PENDING, tenMinutesAgo);
+        List<Ticket> tickets = ticketRepository.findAllByStatusAndCreatedAtBefore(TicketStatus.PENDING, oneMinuteAgo);
 
         for (Ticket ticket : tickets) {
+            // Lấy danh sách mã ghế từ chuỗi
+            String seatCodeStr = ticket.getSeatCode(); // ví dụ: "A1,A2"
+            List<String> seatCodes = Arrays.asList(seatCodeStr.split(","));
+
+            // Xoá các ghế đã đặt
+            List<SeatTrip> bookedSeats = seatTripRepository.findByTripIdAndSeatCodeIn(
+                    ticket.getTrip().getId(), seatCodes
+            );
+            seatTripRepository.deleteAll(bookedSeats);
+
+            // Huỷ vé
             ticket.setStatus(TicketStatus.CANCELLED);
 
+            // Cập nhật lại số ghế trống của chuyến đi
             Trip trip = ticket.getTrip();
             int currentAvailable = trip.getAvailableSeats();
-
-            // Tách seatCode thành danh sách ghế (giả sử ngăn cách bằng dấu phẩy)
-            String seatCodeStr = ticket.getSeatCode(); // ví dụ: "A1,A2,A3"
-            int seatsToRestore = seatCodeStr.isEmpty() ? 0 : seatCodeStr.split(",").length;
-
+            int seatsToRestore = seatCodes.size();
             trip.setAvailableSeats(currentAvailable + seatsToRestore);
             tripRepository.save(trip);
         }
@@ -248,9 +256,10 @@ public class TicketService implements ITicketService {
         ticketRepository.saveAll(tickets);
 
         if (!tickets.isEmpty()) {
-            System.out.println("Đã huỷ " + tickets.size() + " vé chưa thanh toán sau 10 phút.");
+            System.out.println("✅ Đã huỷ " + tickets.size() + " vé chưa thanh toán sau 1 phút.");
         }
     }
+
 
 
 
