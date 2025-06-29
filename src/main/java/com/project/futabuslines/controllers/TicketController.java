@@ -8,12 +8,10 @@ import com.project.futabuslines.enums.PaymentResult;
 import com.project.futabuslines.models.*;
 import com.project.futabuslines.repositories.SeatTripRepository;
 import com.project.futabuslines.repositories.TicketRepository;
+import com.project.futabuslines.repositories.TripRepository;
 import com.project.futabuslines.response.TicketDetailsResponse;
 import com.project.futabuslines.response.TicketResponse;
-import com.project.futabuslines.services.EmailService;
-import com.project.futabuslines.services.NotificationService;
-import com.project.futabuslines.services.TicketService;
-import com.project.futabuslines.services.VnpayService;
+import com.project.futabuslines.services.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -29,12 +27,14 @@ import java.awt.image.BufferedImage;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+
 @RestController
 @RequestMapping("${api.prefix}/ticket")
 @RequiredArgsConstructor
 @CrossOrigin(origins = "*")
 public class TicketController {
-    @Autowired
+//    @Autowired
     private QRCodeGenerator qrCodeGenerator;
     private final TicketService ticketService;
     private final VnpayService vnpayService;
@@ -42,6 +42,8 @@ public class TicketController {
     private final SeatTripRepository seatTripRepository;
     private final NotificationService notificationService;
     private final EmailService emailService;
+    private final TripRepository tripRepository;
+    private final MomoService momoService;
 
     // POST: http://localhost:8080/api/v1/ticket
     @PostMapping("")
@@ -200,28 +202,116 @@ public class TicketController {
             return ResponseEntity.status(HttpStatus.FOUND)
                     .header("Location", "viway://payment/result?status=success")
                     .build();
-        } else {
-            Ticket ticket = ticketRepository.findByCodeTicket(orderId)
-                    .orElse(null); // dùng orElse(null) để tránh lỗi nếu chưa tạo vé
+            } else {
+                Ticket ticket = ticketRepository.findByCodeTicket(orderId)
+                        .orElseThrow(() -> new RuntimeException("Không tìm thấy vé đã tạo"));
 
-            if (ticket != null) {
-                List<String> seatCodes = Arrays.asList(ticket.getSeatCode().split(","));
-                List<SeatTrip> bookedSeats = seatTripRepository.findByTripIdAndSeatCodeIn(
-                        ticket.getTrip().getId(), seatCodes
-                );
-                for (SeatTrip seat : bookedSeats) {
-                    seat.setStatus(TicketStatus.CANCELLED);
+                if (ticket != null) {
+                    List<String> seatCodes = Arrays.asList(ticket.getSeatCode().split(","));
+                    List<SeatTrip> bookedSeats = seatTripRepository.findByTripIdAndSeatCodeIn(
+                            ticket.getTrip().getId(), seatCodes
+                    );
+    //                for (SeatTrip seat : bookedSeats) {
+    //                    seat.setStatus(TicketStatus.CANCELLED);
+    //                }
+    //                seatTripRepository.saveAll(bookedSeats);
+                    ticket.setStatus(TicketStatus.CANCELLED);
+                    Trip trip = ticket.getTrip();
+                    trip.setAvailableSeats(trip.getAvailableSeats() + seatCodes.size());
+                    tripRepository.save(trip); // đừng quên lưu lại
+
+                    seatTripRepository.deleteAll(bookedSeats);
+                    ticketRepository.save(ticket);
                 }
-                seatTripRepository.saveAll(bookedSeats);
-                ticket.setStatus(TicketStatus.CANCELLED);
-                ticketRepository.save(ticket);
-            }
             return ResponseEntity.status(HttpStatus.FOUND)
                     .header("Location", "viway://payment/result?status=fail")
                     .build();
         }
     }
+    @GetMapping("/momo/callback") // hoặc @PostMapping nếu MoMo POST về
+    public ResponseEntity<?> handleMomoCallback(@RequestParam Map<String, String> params) throws Exception {
+        String resultCode = params.get("resultCode");
+        String orderId = params.get("orderId");
 
+        if ("0".equals(resultCode)) {
+            // ✅ Thành công
+            Ticket ticket = ticketRepository.findByCodeTicket(orderId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy vé đã tạo"));
+
+            ticket.setStatus(TicketStatus.CONFIRMED);
+            ticket.setPaymentTime(LocalDateTime.now());
+            ticketRepository.save(ticket);
+
+            List<String> seatCodes = Arrays.asList(ticket.getSeatCode().split(","));
+            List<SeatTrip> bookedSeats = seatTripRepository.findByTripIdAndSeatCodeIn(
+                    ticket.getTrip().getId(), seatCodes
+            );
+            for (SeatTrip seat : bookedSeats) {
+                seat.setIsBooked(true);
+                seat.setStatus(TicketStatus.CONFIRMED);
+            }
+            seatTripRepository.saveAll(bookedSeats);
+
+            BufferedImage qrImage = qrCodeGenerator.generateQRCodeImage(ticket.getCodeTicket());
+
+            String html = String.format("""
+                <!DOCTYPE html>
+                <html><head><meta charset="UTF-8"><style>
+                body { font-family: Arial; }
+                .container { padding: 20px; }
+                .success { color: green; font-weight: bold; }
+                </style></head><body>
+                <div class="container">
+                <p class="success">Thanh toán MoMo thành công!</p>
+                <p>Mã vé: <strong>%s</strong></p>
+                <p>Ghế: <strong>%s</strong></p>
+                <p>Tuyến: <strong>%s → %s</strong></p>
+                <p>Thời gian: %s %s</p>
+                </div></body></html>
+                """,
+                    ticket.getCodeTicket(),
+                    ticket.getSeatCode(),
+                    ticket.getTrip().getRoute().getOrigin(),
+                    ticket.getTrip().getRoute().getDestination(),
+                    ticket.getTrip().getDepartureTime(),
+                    ticket.getTrip().getTimeStart()
+            );
+
+            User user = ticket.getUser();
+            notificationService.sendNotification(
+                    user.getId(),
+                    "Thanh toán " + ticket.getTotalMoney() + " bằng MoMo thành công. Mã vé: " + ticket.getCodeTicket(),
+                    "Thanh toán thành công"
+            );
+            emailService.send(ticket.getEmail(), "Xác nhận vé MoMo", html, qrImage);
+
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header("Location", "viway://payment/result?status=success")
+                    .build();
+
+        } else {
+            // ❌ Thất bại hoặc từ chối
+            Ticket ticket = ticketRepository.findByCodeTicket(orderId)
+                    .orElseThrow(() -> new RuntimeException("Không tìm thấy vé đã tạo"));
+
+            List<String> seatCodes = Arrays.asList(ticket.getSeatCode().split(","));
+            List<SeatTrip> bookedSeats = seatTripRepository.findByTripIdAndSeatCodeIn(
+                    ticket.getTrip().getId(), seatCodes
+            );
+
+            Trip trip = ticket.getTrip();
+            trip.setAvailableSeats(trip.getAvailableSeats() + seatCodes.size());
+            tripRepository.save(trip);
+
+            seatTripRepository.deleteAll(bookedSeats);
+            ticket.setStatus(TicketStatus.CANCELLED);
+            ticketRepository.save(ticket);
+
+            return ResponseEntity.status(HttpStatus.FOUND)
+                    .header("Location", "viway://payment/result?status=fail")
+                    .build();
+        }
+    }
     // GET: http://localhost:8080/api/v1/ticket/history/{userId}
     @GetMapping("/history/{userId}")
     public ResponseEntity<List<TicketResponse>> getTicketHistory(@PathVariable Long userId) {
@@ -259,7 +349,9 @@ public class TicketController {
                 seat.setStatus(TicketStatus.CANCELLED);
             }
             seatTripRepository.saveAll(bookedSeats);
-
+            Trip trip = ticket.getTrip();
+            trip.setAvailableSeats(trip.getAvailableSeats() + seatCodes.size());
+            tripRepository.save(trip);
             notificationService.sendNotification(
                     ticket.getUser().getId(),
                     "Bạn đã huỷ vé có mã: " + ticket.getCodeTicket(),

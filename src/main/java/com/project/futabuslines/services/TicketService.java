@@ -39,6 +39,7 @@ public class TicketService implements ITicketService {
     private final SeatRepository seatRepository;
     private final RouteRepository routeRepository;
     private final VnpayService vnpayService;
+    private final MomoService momoService;
 
     @Transactional
     @Override
@@ -146,15 +147,23 @@ public class TicketService implements ITicketService {
         Ticket ticket = ticketRepository.findById(paymentDTO.getTicketId())
                 .orElseThrow(() -> new RuntimeException("❌ Không tìm thấy vé với ID đã cung cấp"));
 
+        String codeTicket = ticket.getCodeTicket();
+        long totalMoney = ticket.getTotalMoney(); // giả sử trả về long
+        int amount = (int) totalMoney; // Đơn vị: đồng
+
         if (paymentDTO.getPaymentMethod().equalsIgnoreCase("VNPAY")) {
-            String paymentUrl = vnpayService.createPaymentUrl(
-                    ticket.getCodeTicket(), ticket.getTotalMoney(), clientIp
-            );
-            return new PaymentRedirectResponse(paymentUrl, "Vui lòng truy cập đường dẫn để thanh toán.");
+            String paymentUrl = vnpayService.createPaymentUrl(codeTicket, amount, clientIp);
+            return new PaymentRedirectResponse(paymentUrl, "✅ Vui lòng truy cập đường dẫn VNPAY để thanh toán.");
+        }
+
+        if (paymentDTO.getPaymentMethod().equalsIgnoreCase("MOMO")) {
+            String paymentUrl = momoService.createPaymentUrl(codeTicket, amount, clientIp);
+            return new PaymentRedirectResponse(paymentUrl, "✅ Vui lòng truy cập đường dẫn MoMo để thanh toán.");
         }
 
         return ticket;
     }
+
     @Override
     public List<Ticket> getAllTicket() {
         return ticketRepository.findAll();
@@ -163,7 +172,7 @@ public class TicketService implements ITicketService {
     private String generateUniqueTicketCode() {
         String code;
         do {
-            code = "FUTA" + generateRandomAlphaNumeric(6); // 6 ký tự chữ và số
+            code = "VIWAY" + generateRandomAlphaNumeric(6); // 6 ký tự chữ và số
         } while (ticketRepository.existsByCodeTicket(code));
         return code;
     }
@@ -216,15 +225,24 @@ public class TicketService implements ITicketService {
         return TicketDetailsResponse.fromTicket(ticket);
     }
 
-    @Scheduled(fixedRate = 60000) // chạy mỗi 60s
+    @Scheduled(fixedRate = 60000)
     public void cancelUnpaidTickets() {
         LocalDateTime tenMinutesAgo = LocalDateTime.now().minusMinutes(10).withNano(0);
 
-        // Tìm tất cả các vé có status là PENDING và tạo trước 10 phút
         List<Ticket> tickets = ticketRepository.findAllByStatusAndCreatedAtBefore(TicketStatus.PENDING, tenMinutesAgo);
 
         for (Ticket ticket : tickets) {
             ticket.setStatus(TicketStatus.CANCELLED);
+
+            Trip trip = ticket.getTrip();
+            int currentAvailable = trip.getAvailableSeats();
+
+            // Tách seatCode thành danh sách ghế (giả sử ngăn cách bằng dấu phẩy)
+            String seatCodeStr = ticket.getSeatCode(); // ví dụ: "A1,A2,A3"
+            int seatsToRestore = seatCodeStr.isEmpty() ? 0 : seatCodeStr.split(",").length;
+
+            trip.setAvailableSeats(currentAvailable + seatsToRestore);
+            tripRepository.save(trip);
         }
 
         ticketRepository.saveAll(tickets);
@@ -233,6 +251,8 @@ public class TicketService implements ITicketService {
             System.out.println("Đã huỷ " + tickets.size() + " vé chưa thanh toán sau 10 phút.");
         }
     }
+
+
 
 
 }

@@ -97,7 +97,8 @@ public class JwtTokenFilter extends OncePerRequestFilter {
                 Pair.of(String.format("%s/otp/verify",apiPrefix), "POST"),
                 Pair.of(String.format("%s/ticket/vnpay-return", apiPrefix), "GET"),
                 Pair.of(String.format("%s/payment/vnpay/notify", apiPrefix), "POST"),
-                Pair.of(String.format("%s/feedbacks", apiPrefix), "POST")
+                Pair.of(String.format("%s/feedbacks", apiPrefix), "POST"),
+                Pair.of(String.format("%s/ticket/momo/callback", apiPrefix), "GET")
         );
         System.out.println("apiPrefix = " + apiPrefix);
         System.out.println("Path = " + request.getServletPath());
